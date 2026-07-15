@@ -126,7 +126,7 @@ class LocalStreamingRuntime(StreamingRuntime):
         self._proc = subprocess.Popen(
             cmd_args,
             env=self.spec.get_full_env(env),
-            stdin=None,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,

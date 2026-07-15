@@ -53,6 +53,7 @@ _SCB_TO_PI_PROVIDER: dict[str, str] = {
     "ai_gateway": "vercel-ai-gateway",
     "vercel-ai-gateway": "vercel-ai-gateway",
     "minimax": "minimax",
+    "deepseek": "deepseek",
 }
 
 _PI_PROVIDER_NAMES = {
@@ -74,6 +75,7 @@ _PI_PROVIDER_NAMES = {
     "github-copilot",
     "google-gemini-cli",
     "google-antigravity",
+    "deepseek",
 }
 
 _CREDENTIAL_ENV_KEYS: dict[str, str] = {

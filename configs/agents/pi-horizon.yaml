@@ -1,0 +1,11 @@
+type: pi
+binary: pi
+version: 0.80.6
+timeout: 7200
+thinking: "off"
+extra_args: ["--no-extensions", "-e", "/Users/jakeprokopets/Downloads/pi-cost-harness/extensions/horizon-context.ts", "-e", "/Users/jakeprokopets/Downloads/pi-cost-harness/extensions/step-verify.ts", "-e", "/Users/jakeprokopets/Downloads/pi-cost-harness/extensions/briefing.ts", "-e", "/Users/jakeprokopets/.pi/agent/npm/node_modules/pi-subagents/src/extension/index.ts", "--append-system-prompt", "Route exploration (reads, greps, repo-wide searches) through the explore subagent. Main thread is for planning and edits only."]
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
