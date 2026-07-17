@@ -100,6 +100,63 @@ def make_timeout_fn(
     return timeout_fn
 
 
+class _StreamAssembler:
+    """Assemble one output stream (stdout or stderr) in O(total) time.
+
+    The previous implementation did ``buf += payload`` per chunk and rescanned
+    the ENTIRE accumulated buffer for the setup/agent split marker on every
+    chunk. Both are O(n) per chunk, so a checkpoint that emits a large volume of
+    output (e.g. a tool dumping megabytes) pinned a CPU core for many minutes in
+    a hot loop — the real reason SCB runs appeared to "hang". Here chunks go into
+    a list joined once, and the marker is searched only across the new chunk plus
+    a marker-width overlap, so total work is linear.
+    """
+
+    def __init__(self, marker: str | None):
+        self._marker = marker
+        self._yielding = marker is None  # no marker => stream everything
+        self._pre: list[str] = []        # chunks seen before the marker
+        self._pre_len = 0                # total chars in self._pre
+        self._tail = ""                  # last marker-1 chars, for a split marker
+        self._out: list[str] = []        # chunks after the marker (or all if none)
+        self._setup = ""                 # pre-marker text, captured at the split
+
+    def feed(self, payload: str) -> str | None:
+        """Consume a chunk; return the text to yield downstream, or None."""
+        if self._yielding:
+            self._out.append(payload)
+            return payload if payload.strip() else None
+
+        marker = self._marker
+        assert marker is not None
+        probe = self._tail + payload
+        idx = probe.find(marker)
+        if idx == -1:
+            self._pre.append(payload)
+            self._pre_len += len(payload)
+            self._tail = probe[-(len(marker) - 1):] if len(marker) > 1 else ""
+            return None
+
+        # Marker found: reconstruct the full pre-marker buffer once and split.
+        full = "".join(self._pre) + payload
+        pos = (self._pre_len - len(self._tail)) + idx
+        self._setup = full[:pos]
+        after = full[pos + len(marker):]
+        self._yielding = True
+        self._pre = []
+        self._tail = ""
+        if after:
+            self._out.append(after)
+        return after if after.strip() else None
+
+    def finalize(self) -> tuple[str, str]:
+        """Return (main_output, setup_output), matching the original semantics:
+        marker found -> (after-marker, before-marker); never found -> (all, "")."""
+        if self._yielding:
+            return "".join(self._out), self._setup
+        return "".join(self._pre), ""
+
+
 def process_stream(
     stream: Iterator[tuple[str | bytes, str | bytes]],
     timeout: float | None,
@@ -119,49 +176,24 @@ def process_stream(
         tuple[Literal["stdout", "stderr", "finished"], str | None]
     ] = queue.Queue()
     thread = start_stream_pump(stream, event_queue, stop_event)
-    stdout = ""
-    stderr = ""
-    setup_stdout = ""
-    setup_stderr = ""
-    yielding_stdout = yield_only_after is None
-    yielding_stderr = yield_only_after is None
+    stdout_asm = _StreamAssembler(yield_only_after)
+    stderr_asm = _StreamAssembler(yield_only_after)
     timed_out = False
 
     def handle_event(
         kind: Literal["stdout", "stderr"],
         payload: str,
     ) -> Iterator[RuntimeEvent]:
-        nonlocal stdout, stderr, setup_stdout, setup_stderr
-        nonlocal yielding_stdout, yielding_stderr
-
         if kind == "stdout":
-            stdout += payload
-            if (
-                not yielding_stdout
-                and yield_only_after
-                and yield_only_after in stdout
-            ):
-                yielding_stdout = True
-                setup_stdout, stdout = stdout.split(yield_only_after, 1)
-                payload = stdout
-
-            if yielding_stdout and payload.strip():
-                yield RuntimeEvent(kind="stdout", text=payload)
+            text = stdout_asm.feed(payload)
+            if text is not None:
+                yield RuntimeEvent(kind="stdout", text=text)
             return
 
         if kind == "stderr":
-            stderr += payload
-            if (
-                not yielding_stderr
-                and yield_only_after
-                and yield_only_after in stderr
-            ):
-                yielding_stderr = True
-                setup_stderr, stderr = stderr.split(yield_only_after, 1)
-                payload = stderr
-
-            if yielding_stderr and payload.strip():
-                yield RuntimeEvent(kind="stderr", text=payload)
+            text = stderr_asm.feed(payload)
+            if text is not None:
+                yield RuntimeEvent(kind="stderr", text=text)
             return
 
         logger.error("Received unknown event", kind=kind, payload=payload)
@@ -236,6 +268,8 @@ def process_stream(
     exit_code = exit_code or poll_fn()
     if exit_code is None:
         exit_code = -1
+    stdout, setup_stdout = stdout_asm.finalize()
+    stderr, setup_stderr = stderr_asm.finalize()
     logger.debug(
         "Setup stdout", setup_stdout=setup_stdout, setup_stderr=setup_stderr
     )

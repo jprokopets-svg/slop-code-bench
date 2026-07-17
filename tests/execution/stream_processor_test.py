@@ -6,7 +6,48 @@ import threading
 import time
 
 from slop_code.execution import stream_processor
-from slop_code.execution.stream_processor import ensure_string, process_stream
+from slop_code.execution.stream_processor import (
+    _StreamAssembler,
+    ensure_string,
+    process_stream,
+)
+
+
+def test_assembler_splits_on_marker_within_a_chunk() -> None:
+    asm = _StreamAssembler("<<<MARK>>>")
+    assert asm.feed("setup\n") is None
+    assert asm.feed("x<<<MARK>>>agent") == "agent"
+    out, setup = asm.finalize()
+    assert (out, setup) == ("agent", "setup\nx")
+
+
+def test_assembler_splits_on_marker_across_chunk_boundary() -> None:
+    asm = _StreamAssembler("<<<MARK>>>")
+    asm.feed("before<<<MA")
+    asm.feed("RK>>>after")
+    out, setup = asm.finalize()
+    assert (out, setup) == ("after", "before")
+
+
+def test_assembler_marker_never_found_matches_original_semantics() -> None:
+    asm = _StreamAssembler("ZZZ")
+    for _ in range(4):
+        asm.feed("data")
+    out, setup = asm.finalize()
+    assert (out, setup) == ("datadatadatadata", "")
+
+
+def test_assembler_is_linear_on_large_output() -> None:
+    """Regression for the O(n^2) accumulation that pinned a CPU core for minutes
+    on a checkpoint that emitted a large volume of output before any marker."""
+    asm = _StreamAssembler("NEVER")
+    start = time.monotonic()
+    for _ in range(200_000):
+        asm.feed("x" * 64)  # ~12.8 MB total, marker never appears
+    out, _ = asm.finalize()
+    elapsed = time.monotonic() - start
+    assert len(out) == 200_000 * 64
+    assert elapsed < 3.0  # O(n): sub-second in practice; O(n^2) took minutes
 
 
 def test_ensure_string_preserves_text_around_invalid_utf8_bytes() -> None:
