@@ -7,6 +7,7 @@ multiple commands via `docker exec` for streaming output.
 from __future__ import annotations
 
 import contextlib
+import os
 import queue
 import subprocess
 import threading
@@ -35,6 +36,11 @@ if TYPE_CHECKING:
     from docker.models.containers import Container as DockerContainer
 
 logger = get_logger(__name__)
+
+# Bounded-teardown budget: how long the docker SDK stop/kill/remove may take before
+# we abandon it for a hard `docker rm -f`, and the timeout on that force-kill itself.
+CONTAINER_TEARDOWN_GRACE = float(os.environ.get("SCB_CONTAINER_TEARDOWN_GRACE_S", "30"))
+CONTAINER_FORCE_KILL_TIMEOUT = float(os.environ.get("SCB_CONTAINER_FORCE_KILL_TIMEOUT_S", "30"))
 
 
 class DockerStreamingRuntime(StreamingRuntime):
@@ -205,23 +211,47 @@ class DockerStreamingRuntime(StreamingRuntime):
         return volumes
 
     def _stop_and_remove_container(self, container: DockerContainer) -> None:
-        """Stop and remove a Docker container safely."""
+        """Stop and remove a Docker container, with a bounded fallback.
+
+        The docker SDK stop/kill/remove calls have no client-side deadline, so a
+        wedged daemon or a half-dead container can block teardown forever — the
+        second half of the tail-stall failure (the first half was the unbounded
+        stream join, fixed in stream_processor). We run the SDK teardown in a
+        thread and, if it does not finish within CONTAINER_TEARDOWN_GRACE, fall
+        back to a `docker rm -f` subprocess with its own hard timeout and move on.
+        """
+        container_id = container.id
         logger.debug(
             "Stopping and removing container",
-            container_id=container.id[:12],
+            container_id=container_id[:12],
             verbose=True,
         )
-        try:
-            container.stop(timeout=1)
-        except (DockerException, APIError):
+
+        def _sdk_teardown() -> None:
+            try:
+                container.stop(timeout=1)
+            except (DockerException, APIError):
+                with contextlib.suppress(DockerException, APIError):
+                    container.kill()
+            with contextlib.suppress(DockerException, APIError):
+                container.remove(force=True)
+
+        worker = threading.Thread(target=_sdk_teardown, daemon=True)
+        worker.start()
+        worker.join(timeout=CONTAINER_TEARDOWN_GRACE)
+        if worker.is_alive():
             logger.warning(
-                "Failed to stop container",
-                container_id=container.id[:12],
+                "Container teardown exceeded grace; forcing docker rm -f",
+                container_id=container_id[:12],
+                grace=CONTAINER_TEARDOWN_GRACE,
                 verbose=True,
             )
-            container.kill()
-        with contextlib.suppress(DockerException, APIError):
-            container.remove(force=True)
+            with contextlib.suppress(Exception):
+                subprocess.run(
+                    [self.spec.docker.binary, "rm", "-f", container_id],
+                    capture_output=True,
+                    timeout=CONTAINER_FORCE_KILL_TIMEOUT,
+                )
 
     def _ensure_container_running(self) -> DockerContainer:
         """Ensure the long-lived container exists and is running."""

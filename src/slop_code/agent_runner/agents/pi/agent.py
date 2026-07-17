@@ -79,6 +79,7 @@ _PI_PROVIDER_NAMES = {
 }
 
 _CREDENTIAL_ENV_KEYS: dict[str, str] = {
+    "deepseek": "DEEPSEEK_API_KEY",
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "claude_code_oauth": "ANTHROPIC_OAUTH_TOKEN",
