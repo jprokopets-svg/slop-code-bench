@@ -180,3 +180,92 @@ The critical unanswered question is whether the cliff is *path-dependent* (accum
 **Strongest honest claim:**
 
 pi-horizon + DeepSeek-V4-Flash produces functional code that passes 100% of core tests on early checkpoints across 3/4 problems, degrades abruptly at a problem-specific later checkpoint, and costs $0.04-0.05 per problem across 4 checkpoints. The extension infrastructure (briefing, compaction, verify loops) is operational but its value vs. vanilla cannot be assessed from this pilot alone. The DeepSeek empty-response failure mode is now guarded. The 1-rep pilot is suggestive of cliff-degradation but not conclusive; the next step is a vanilla contrast run on the same 4 problems.
+
+---
+
+## 6. Time Dimension: Horizon vs Vanilla
+
+### Caveat: machine load
+
+Both arms ran under heavy parallel load and are **not directly comparable on wall time**:
+- **Horizon:** 2-3 concurrent problems + prior-run post-processing workers
+- **Vanilla:** 4 concurrent problems + horizon's 32GB/99% CPU post-processing worker running for the first 12 hours
+
+Prefer **steps and tokens** over wall seconds for the comparison. Wall times are included for completeness but should not be used to claim one arm is "faster."
+
+### Per problem x checkpoint: wall time, steps, output tokens/sec
+
+**file_backup**
+
+| CP | Wall(H) | Wall(V) | Steps(H) | Steps(V) | Turns(H) | Turns(V) |
+|---|---|---|---|---|---|---|
+| 1 | 196s | 2,933s | 24 | 121 | 11 | 61 |
+| 2 | 10,238s | 7,640s | 82 | 19 | 6 | 2 |
+| 3 | 947s | 1,479s | 43 | 45 | 20 | 9 |
+| 4 | 20,210s | 8,315s | 23 | 44 | 2 | 1 |
+| **Tot** | **31,591s** | **20,367s** | **172** | **229** | **39** | **73** |
+
+**dynamic_config_service_api**
+
+| CP | Wall(H) | Wall(V) | Steps(H) | Steps(V) | Turns(H) | Turns(V) |
+|---|---|---|---|---|---|---|
+| 1 | 11,919s | 19,116s | 120 | 58 | 3 | 10 |
+| 2 | 12,921s | 1,879s | 27 | 39 | 9 | 7 |
+| 3 | 9,871s | 7,393s | 38 | 40 | 18 | 16 |
+| 4 | 5,508s | 16,837s | 41 | 139 | 18 | 34 |
+| **Tot** | **40,219s** | **45,225s** | **226** | **276** | **48** | **67** |
+
+**etl_pipeline**
+
+| CP | Wall(H) | Wall(V) | Steps(H) | Steps(V) | Turns(H) | Turns(V) |
+|---|---|---|---|---|---|---|
+| 1 | 3,555s | 1,700s | 113 | 25 | 3 | 13 |
+| 2 | 2,253s | 2,173s | 14 | 27 | 4 | 8 |
+| 3 | 2,182s | 5,822s | 37 | 116 | 5 | 58 |
+| 4 | 407s | 1,999s | 59 | 7 | 29 | 3 |
+| 5 | 90s | 7,708s | 7 | 8 | 3 | 1 |
+| **Tot** | **8,487s** | **19,402s** | **230** | **183** | **44** | **83** |
+
+**code_search**
+
+| CP | Wall(H) | Wall(V) | Steps(H) | Steps(V) | Turns(H) | Turns(V) |
+|---|---|---|---|---|---|---|
+| 1 | 37s | 1,700s | 19 | 12 | 10 | 6 |
+| 2 | 44s | 116s | 29 | 38 | 15 | 18 |
+| 3 | 5,273s | 9,031s | 88 | 51 | 42 | 24 |
+| 4 | 232s | 6,708s | 5 | 16 | 2 | 2 |
+| 5 | 274s | 3,235s | 147 | 95 | 68 | 1 |
+| **Tot** | **5,860s** | **20,790s** | **288** | **212** | **137** | **51** |
+
+### Aggregates
+
+| Metric | Horizon | Vanilla |
+|---|---|---|
+| Total agent wall time | 23.9 h | 29.4 h |
+| Mean wall time / checkpoint | 4,786s | 5,877s |
+| Total steps | 916 | 900 |
+| Mean steps / checkpoint | 50.9 | 50.0 |
+| Total output tokens | 171,814 | 149,039 |
+| Total input tokens | 11,770,929 | 8,484,224 |
+| Core-solved checkpoints | 7 | 10 |
+| **Agent seconds / core-solved cp** | **12,308s** | **10,578s** |
+| **Steps / core-solved cp** | **131** | **90** |
+
+### Attribution: where does horizon's extra effort go?
+
+**Extension overhead per checkpoint (horizon only):**
+- **Briefing injection:** 1 message_start/message_end pair per checkpoint (the `pi-harness-briefing` customType). Negligible wall time.
+- **Memory injection:** 1 `pi-harness-horizon-memory` injection per cp2+ (repo-model.md, 325-2962 bytes). Negligible wall time.
+- **Verify loops:** 1-2 per checkpoint. The second loop re-runs a verification step but does not trigger additional tool calls in most cases. No measurable wall time cost.
+- **Compactions:** 37 on file_backup cp4 (the 20,210s checkpoint); 7 each on dynamic_config cp2-4. Compaction is a context-management operation within Pi, not a separate API call — it truncates older turns to stay within context window. Zero recorded cost in horizon_costs.jsonl.
+- **Subagent routing:** The `--append-system-prompt` instruction ("Route exploration through the explore subagent") caused 1 subagent marker per checkpoint in most cases. No evidence of concurrent subagent activity — the "explore" subagent runs serially within the main Pi session, adding turns rather than parallelizing.
+
+**The extensions do not add measurable API-call overhead.** The cost difference ($0.181 horizon vs $0.125 vanilla) comes from horizon consuming 39% more input tokens (11.8M vs 8.5M) due to memory/briefing injections accumulating in context, and 15% more output tokens (172K vs 149K). The extra tokens buy lower erosion and verbosity but not more correctness.
+
+**Subagent routing did not parallelize anything.** The explore subagent instruction adds a routing constraint that runs serially. The main observable effect is that horizon uses fewer assistant turns per checkpoint on some problems (39 vs 73 on file_backup, 48 vs 67 on dynamic_config) but more on code_search (137 vs 51). The "plan + delegate" pattern produces fewer but larger turns, not faster execution.
+
+### Time verdict
+
+**Horizon does not buy speed — it washes on steps and loses on efficiency.**
+
+Steps are near-identical (916 vs 900). But horizon needs 131 steps per core-solved checkpoint vs vanilla's 90 — a 46% overhead per useful outcome. The extensions add context (11.8M vs 8.5M input tokens) without adding correctness, making each step more expensive without making it more productive. Wall time comparison is unreliable due to machine load, but the load-independent metrics (steps, tokens, core-solved efficiency) consistently favor vanilla.
