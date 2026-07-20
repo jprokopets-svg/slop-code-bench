@@ -1,0 +1,41 @@
+# longhorizon-v1 with slop-metrics ABLATED (slop_metrics: false).
+#
+# The ablation arm for M5. Extensions are BYTE-IDENTICAL to megabench-longhorizon-v1
+# -- the only difference is the config flag, per the house leave-one-out
+# convention (cf. pi-fused / pi-fused-noevict).
+#
+# NOTE: slop-metrics still SAMPLES and LOGS when ablated; it only stops
+# triggering. That is deliberate: the arm records what it WOULD have fired on,
+# which makes the counterfactual measurable rather than assumed.
+#
+# Requires a sibling harness dir whose pi-harness.config.json sets
+# slop_metrics:false. Points at longhorizon-v1-noslop/ for exactly that reason.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400 # 4h. Same as megabench-pi-evict-v4; longhorizon does strictly
+               # more per checkpoint (verifier subprocess + up to 2 refactor
+               # phases), so treat this as a floor and revisit after the pilot.
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  # Layer 1 — table stakes, always on.
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1-noslop/extensions/state-manager.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1-noslop/extensions/context-layers.ts"
+  # Layer 2 — the ablation set. Present in every arm; gated by the flags in
+  # pi-harness.config.json, NOT by presence/absence here. Removing a line would
+  # change the loaded extension set and break the byte-identical convention.
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1-noslop/extensions/locked-spec.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1-noslop/extensions/supervisor.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1-noslop/extensions/slop-metrics.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
