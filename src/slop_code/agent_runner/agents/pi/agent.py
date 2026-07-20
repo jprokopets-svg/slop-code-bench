@@ -8,6 +8,7 @@ import functools
 import json
 import os
 import shlex
+import shutil
 import tempfile
 import typing as tp
 from pathlib import Path
@@ -33,6 +34,9 @@ from slop_code.execution import DockerEnvironmentSpec
 from slop_code.execution import EnvironmentSpec
 from slop_code.execution import Session
 from slop_code.execution import StreamingRuntime
+from slop_code.logging import get_logger
+
+logger = get_logger(__name__)
 
 PiThinking = tp.Literal["off", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -207,6 +211,10 @@ class PiAgent(Agent):
     PROMPT_FILENAME = "prompt.txt"
     STDOUT_FILENAME = "stdout.jsonl"
     STDERR_FILENAME = "stderr.log"
+    # Pi extensions write telemetry into <workspace>/.pi-harness. The workspace
+    # is a TemporaryDirectory destroyed when the problem finishes, so anything
+    # left there is lost unless it is copied out at a checkpoint boundary.
+    PI_HARNESS_DIRNAME = ".pi-harness"
 
     def __init__(
         self,
@@ -821,6 +829,38 @@ class PiAgent(Agent):
             stderr_text = self._last_command.stderr or ""
 
         self._write_artifacts(path, self._artifact_payloads, stderr_text)
+        self._save_pi_harness(path)
+
+    def _save_pi_harness(self, path: Path) -> None:
+        """Copy the extension telemetry dir out of the live workspace.
+
+        Pi extensions write to ``<workspace>/.pi-harness``. The workspace is a
+        ``TemporaryDirectory`` created once per PROBLEM and destroyed by
+        ``Workspace.cleanup`` when the problem ends, so extension output does not
+        survive on its own. This runs per checkpoint, while the session is still
+        live, and is the SCB analogue of megabench's ``_capture_pi_harness``.
+
+        Note the directory is shared by every checkpoint in a chain (SCB does not
+        reset the workspace between checkpoints), so each checkpoint's copy is
+        CUMULATIVE. Take deltas between consecutive checkpoints, or split on the
+        per-run ``summary`` records the extension emits, to get per-checkpoint
+        figures.
+
+        Best-effort: telemetry capture must never fail a run.
+        """
+        try:
+            if self._session is None:
+                return
+            source = Path(self.session.working_dir) / self.PI_HARNESS_DIRNAME
+            if not source.is_dir():
+                return
+            shutil.copytree(
+                source, path / self.PI_HARNESS_DIRNAME, dirs_exist_ok=True
+            )
+        except Exception:  # noqa: BLE001 - never break a run over telemetry
+            logger.debug(
+                "Failed to capture .pi-harness", verbose=True, exc_info=True
+            )
 
     def cleanup(self) -> None:
         if self._runtime is not None:

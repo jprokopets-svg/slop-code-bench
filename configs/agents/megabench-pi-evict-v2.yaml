@@ -1,0 +1,35 @@
+# pi-evict-v2 under SlopCodeBench — pi with real context eviction.
+#
+# Extension passthrough mechanism: SCB shells out to the pi CLI and splices
+# `extra_args` verbatim into the argv (agents/pi/agent.py:731-749). `-e` is not
+# in _PROTECTED_PI_FLAGS, so explicit extension loading works with no runner
+# change. Pattern is `--no-extensions` (drop the auto-discovered set) followed by
+# one `-e <ABSOLUTE PATH>` per extension.
+#
+# PATHS MUST BE ABSOLUTE AND RESOLVABLE FROM INSIDE THE EXECUTION ENVIRONMENT.
+# Under `local-py` the host path works directly. Under `docker-python3.12-uv`
+# it does NOT: PiAgent.setup only mounts a temp pi-auth dir at $HOME/.pi/agent
+# (agent.py:488-508) and there is no mount for extension source. Use local-py
+# until an extension mount exists.
+#
+# The extension reads its sibling pi-harness.config.json via dirname(__dirname),
+# i.e. /home/jprok/harnesses/pi-evict-v2/pi-harness.config.json — so the whole
+# harness dir must be readable, not just the .ts file.
+#
+# Pair this against megabench-pi-vanilla.yaml (same flags minus the -e) for a
+# single-axis eviction comparison.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 7200 # seconds
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/pi-evict-v2/extensions/eviction-v2.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
