@@ -1,0 +1,109 @@
+# longhorizon-v1 under SlopCodeBench — the outer-loop control system.
+#
+# See megabench-pi-evict-v2.yaml for the extension-passthrough mechanism and the
+# local-py constraint; both apply here unchanged. This header covers only what
+# is specific to longhorizon-v1.
+#
+# Harness source of truth: ~/harnesses/longhorizon-v1/ (harness.yaml, SPEC.md).
+# This file MIRRORS that harness.yaml's agent stanza with host-absolute `-e`
+# paths, because SCB is driven by its own CLI and megabench does not run SCB
+# (SPEC.md §8.5). The two files must be kept in sync BY HAND. Nothing is
+# vendored: the fork references the harness dir across repos by absolute path,
+# which is the existing convention (megabench-pi-evict-v2/v4 do the same).
+#
+# PATHS ARE FOR THE PC TEST BENCH (/home/jprok/...), matching the other
+# megabench-* configs in this directory. The Mac Studio is the design studio;
+# runs happen on the PC, where DEEPSEEK_API_KEY lives. On a machine where the
+# harnesses repo sits elsewhere, every path below must be rewritten — they are
+# absolute by necessity, not by preference.
+#
+# EXTENSION ORDER MATTERS. state-manager writes the state files that every other
+# extension reads, and context-layers must see tool results before the
+# mechanisms that depend on compaction having already happened. Keep this order
+# identical to harness.yaml's `extensions:` list.
+#
+# The extensions read their sibling pi-harness.config.json via
+# dirname(__dirname), i.e. /home/jprok/harnesses/longhorizon-v1/pi-harness.config.json
+# — so the WHOLE harness dir must be readable, not just the .ts files. That file
+# also carries the ablation flags: an ablation arm is a copy of the harness dir
+# with exactly one Layer 2 flag flipped false and the .ts files byte-identical,
+# plus a copy of THIS config pointing at that dir.
+#
+# ── MODEL IS NOT SET HERE ────────────────────────────────────────────────────
+# `--model` and `--provider` are in _PROTECTED_PI_FLAGS (agents/pi/agent.py:113)
+# and `-m/--model` is a REQUIRED CLI option on infer-problem
+# (entrypoints/commands/infer_problem.py:79). The model is therefore selected on
+# the command line, NOT in this file:
+#
+#     -m deepseek/deepseek-v4-flash
+#
+# ── HOW TO RUN ───────────────────────────────────────────────────────────────
+# Solve under local-py (extension paths do NOT mount under docker), then
+# evaluate against docker afterwards — SPEC.md §8.5:
+#
+#   uv run slop-code infer-problem <problem> \
+#     -a configs/agents/megabench-longhorizon-v1.yaml \
+#     -e configs/environments/local-py.yaml \
+#     -m deepseek/deepseek-v4-flash \
+#     -prompt configs/prompts/just-solve.jinja \
+#     -o <out-dir> --no-evaluate
+#
+#   uv run slop-code eval-snapshot <out>/<problem>/<checkpoint>/snapshot \
+#     -o <eval-out> -p <problem> -c <checkpoint> \
+#     -e configs/environments/docker-python3.12-uv.yaml
+#
+# NOTE the `-e` collision: on the slop-code CLI `-e` is
+# --environment-config-path; inside `extra_args` below `-e` is pi's own
+# extension flag. They are unrelated.
+#
+# ── OPERATIONAL CAVEATS (SPEC.md §8) ─────────────────────────────────────────
+# * `--no-evaluate` is REQUIRED for the solve pass, and not only for the
+#   docker/local-py split: it also stops SCB early-terminating the chain on a
+#   failed checkpoint (runner.py:689-716), which would truncate exactly the
+#   long-horizon tail this harness exists to measure.
+# * `.pi-harness` capture is CUMULATIVE across checkpoints (pi/agent.py:834-863)
+#   — the workspace is never reset, so each checkpoint's copy contains every
+#   prior checkpoint's telemetry. Analysis MUST delta consecutive copies using
+#   the `checkpoint_seq` field the extensions stamp on every record. Naive
+#   aggregation double-counts everything, including cost.
+# * Reap agent-spawned orphans BETWEEN PROBLEMS. Neither runtime reaps process
+#   trees: local-py spawns without start_new_session, so pi's grandchildren are
+#   orphaned and keep the workspace fd. This harness spawns MORE subprocesses
+#   than any previous arm (the M2 verifier is a second pi process per milestone),
+#   so the leak is correspondingly worse here.
+# * The M2 verifier's cost is INVISIBLE to SCB's usage stream — it is a separate
+#   pi process. It is logged to .pi-harness/verify_costs.jsonl and must be added
+#   in before any cross-arm cost comparison. SPEC.md §8.4. Do not publish an M2
+#   cost number without it.
+type: pi
+binary: pi
+
+# Docker-template rendering only (PiConfig.get_docker_file, agent.py:198-205);
+# inert under local-py, which is the only environment this config can solve in.
+# Pinned to 0.80.10 to match the other megabench-* configs.
+version: 0.80.10
+timeout: 14400 # 4h. Same as megabench-pi-evict-v4; longhorizon does strictly
+               # more per checkpoint (verifier subprocess + up to 2 refactor
+               # phases), so treat this as a floor and revisit after the pilot.
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  # Layer 1 — table stakes, always on.
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/state-manager.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/context-layers.ts"
+  # Layer 2 — the ablation set. Present in every arm; gated by the flags in
+  # pi-harness.config.json, NOT by presence/absence here. Removing a line would
+  # change the loaded extension set and break the byte-identical convention.
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/locked-spec.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/supervisor.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/slop-metrics.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
