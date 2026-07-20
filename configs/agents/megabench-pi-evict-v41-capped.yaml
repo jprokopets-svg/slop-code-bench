@@ -1,0 +1,24 @@
+# evict-v41-capped — context-pressure arm. reserveTokens forces pi's auto-compaction to
+# trigger at contextWindow - reserveTokens = 1,000,000 - 970,000 = 30,000 tokens.
+# Without this pi runs at the built-in 1M window (threshold ~983,616 tokens), which
+# the SCB pilot never came close to (peak 63,040) -- hence compaction never fired.
+# Delivered via <PI_CODING_AGENT_DIR>/settings.json, which SCB now writes from pi_settings.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/pi-evict-v4/extensions/eviction-v4.ts"
+env: {}
+pi_settings:
+  compaction:
+    enabled: true
+    reserveTokens: 970000
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0

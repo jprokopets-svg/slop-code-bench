@@ -193,6 +193,7 @@ class PiConfig(AgentConfigBase):
     env: dict[str, str] = Field(default_factory=dict)
     provider: str | None = None
     thinking: PiThinking | None = None
+    pi_settings: dict[str, tp.Any] = Field(default_factory=dict)
     docker_template: Path = Path(__file__).parent / "docker.j2"
 
     def get_docker_file(self, base_image: str) -> str | None:
@@ -233,6 +234,7 @@ class PiAgent(Agent):
         thinking: PiThinking | None,
         extra_args: list[str],
         env: dict[str, str],
+        pi_settings: dict[str, tp.Any] | None = None,
     ) -> None:
         super().__init__(
             agent_name="pi",
@@ -250,6 +252,7 @@ class PiAgent(Agent):
         self.thinking = thinking
         self.extra_args = extra_args
         self.env = env
+        self.pi_settings = pi_settings or {}
 
         self._image = image
         self._session: Session | None = None
@@ -307,6 +310,7 @@ class PiAgent(Agent):
             thinking=thinking,
             extra_args=config.extra_args,
             env=config.env,
+            pi_settings=config.pi_settings,
         )
 
     @staticmethod
@@ -492,6 +496,15 @@ class PiAgent(Agent):
             and self.credential.credential_type == CredentialType.FILE
         ):
             self._write_converted_codex_auth(self._pi_auth_dir)
+
+        # pi reads <PI_CODING_AGENT_DIR>/settings.json at startup. SCB creates that
+        # directory empty, so without this pi always runs on built-in defaults and
+        # there is no way to configure it per-arm. Writing it here makes settings
+        # like compaction thresholds declarable from the agent config.
+        if self.pi_settings:
+            (self._pi_auth_dir / "settings.json").write_text(
+                json.dumps(self.pi_settings, indent=2)
+            )
 
         pi_agent_container_path = f"{HOME_PATH}/.pi/agent"
         mounts: dict[str, dict[str, str] | str] = {}

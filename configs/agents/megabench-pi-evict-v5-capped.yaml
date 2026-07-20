@@ -1,0 +1,21 @@
+# pi-evict-v5, capped. budget_tokens in the harness config MUST match the
+# threshold implied here: contextWindow(1,000,000) - reserveTokens(970,000) = 30,000.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/pi-evict-v5/extensions/eviction-v5.ts"
+env: {}
+pi_settings:
+  compaction:
+    enabled: true
+    reserveTokens: 970000
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
