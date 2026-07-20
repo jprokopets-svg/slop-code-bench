@@ -1,0 +1,22 @@
+# ARM B (treatment): detailed-prompt + code-guidelines, both ON. Differs from arm A by exactly these two prompt injections.
+#
+# NOTE: megabench's prompt_style:detailed is NOT applicable here -- it is task
+# information (full statement vs 6-word truncation) and SCB already passes the
+# full spec via just-solve.jinja. The treatment in arm B is NEW guidance text.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/detailed-prompt.ts"
+  - "-e"
+  - "/home/jprok/harnesses/longhorizon-v1/extensions/code-guidelines.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
