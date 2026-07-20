@@ -1,0 +1,22 @@
+# pi-evict-v5.1, UNCAPPED — the do-no-harm arm at pi's native 1M window.
+# No pi_settings, so compaction keeps its default reserveTokens 16,384 and the
+# threshold sits at ~983,616 tokens. v5's budget auto-discovery resolves that
+# same figure, putting the 0.6 preempt line at ~590K tokens -- unreachable on
+# these problems. Expectation: ZERO epochs, no behavioural change vs stock.
+# Because a budget DOES resolve, the legacy growth fallback never engages, so
+# there is no risk of per-turn firing returning.
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/pi-evict-v5/extensions/eviction-v5.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
