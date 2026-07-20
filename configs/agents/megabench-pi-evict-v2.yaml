@@ -22,7 +22,7 @@ type: pi
 binary: pi
 
 version: 0.80.10
-timeout: 7200 # seconds
+timeout: 14400 # seconds
 thinking: "off"
 extra_args:
   - "--no-extensions"

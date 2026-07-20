@@ -1,0 +1,18 @@
+# pi-evict-v4 under SlopCodeBench. See megabench-pi-evict-v2.yaml for the
+# passthrough mechanism and the local-py constraint (extension paths do not
+# mount under docker).
+type: pi
+binary: pi
+
+version: 0.80.10
+timeout: 14400 # 4h; SCB checkpoints have exceeded 600s and chains run 8 deep
+thinking: "off"
+extra_args:
+  - "--no-extensions"
+  - "-e"
+  - "/home/jprok/harnesses/pi-evict-v4/extensions/eviction-v4.ts"
+env: {}
+cost_limits:
+  cost_limit: 0
+  step_limit: 0
+  net_cost_limit: 0
